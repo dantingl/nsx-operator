@@ -47,20 +47,34 @@ func TestConfig_CoeConfig(t *testing.T) {
 func TestConfig_NsxConfig(t *testing.T) {
 	nsxConfig := &NsxConfig{}
 	expect := errors.New("invalid field " + "NsxApiManagers")
-	err := nsxConfig.validate()
+	err := nsxConfig.validate(false)
 	assert.Equal(t, err, expect)
 
 	nsxConfig.NsxApiManagers = []string{"10.0.0.1"}
-	err = nsxConfig.validate()
-	assert.Equal(t, err, nil)
+	expect = errors.New("no ca file or thumbprint provided")
+	err = nsxConfig.validate(false)
+	assert.Equal(t, err, expect)
 
 	nsxConfig.Thumbprint = []string{"0a:fc"}
-	err = nsxConfig.validate()
+	err = nsxConfig.validate(false)
 	assert.Equal(t, err, nil)
 
+	nsxConfig.CaFile = []string{"0a:fc", "ob:fd"}
+	expect = errors.New("ca file count not match manager count")
+	err = nsxConfig.validate(false)
+	assert.Equal(t, err, expect)
+
+	// Insecure == true
+	nsxConfig.CaFile = []string{"0a:fc", "ob:fd"}
+	nsxConfig.Insecure = true
+	err = nsxConfig.validate(false)
+	assert.Equal(t, err, nil)
+
+	nsxConfig.CaFile = []string{}
+	nsxConfig.Insecure = false
 	nsxConfig.Thumbprint = []string{"0a:fc", "ob:fd"}
 	expect = errors.New("thumbprint count not match manager count")
-	err = nsxConfig.validate()
+	err = nsxConfig.validate(false)
 	assert.Equal(t, err, expect)
 }
 
@@ -73,4 +87,21 @@ func TestConfig_NewNSXOperatorConfigFromFile(t *testing.T) {
 	configFilePath = "../mock/nsxop.ini"
 	_, err = NewNSXOperatorConfigFromFile()
 	assert.Equal(t, err, nil)
+}
+
+func TestConfig_GetTokenProvider(t *testing.T) {
+	vcConfig := &VCConfig{}
+	vcConfig.VCEndPoint = "127.0.0.1"
+	vcConfig.SsoDomain = "vsphere@local"
+	vcConfig.HttpsPort = 443
+	nsxConfig := &NSXOperatorConfig{VCConfig: vcConfig, NsxConfig: &NsxConfig{}}
+	tokenProvider := nsxConfig.GetTokenProvider()
+	assert.NotNil(t, tokenProvider)
+}
+
+func TestConfig_GetHA(t *testing.T) {
+	configFilePath = "../mock/nsxop.ini"
+	cf, err := NewNSXOperatorConfigFromFile()
+	assert.Equal(t, err, nil)
+	assert.Equal(t, cf.HAEnabled(), true)
 }

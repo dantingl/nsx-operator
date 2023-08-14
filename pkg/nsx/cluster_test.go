@@ -31,7 +31,7 @@ func TestNewCluster(t *testing.T) {
 	index := strings.Index(ts.URL, "//")
 	a := ts.URL[index+2:]
 	thumbprint := []string{"123"}
-	config := NewConfig(a, "admin", "passw0rd", "", 10, 3, 20, 20, true, true, true, ratelimiter.AIMD, nil, nil, thumbprint)
+	config := NewConfig(a, "admin", "passw0rd", []string{}, 10, 3, 20, 20, true, true, true, ratelimiter.AIMD, nil, nil, thumbprint)
 	_, err := NewCluster(config)
 	assert.True(t, err == nil, fmt.Sprintf("Created cluster failed %v", err))
 }
@@ -59,7 +59,7 @@ func TestCluster_getThumbprint(t *testing.T) {
 	tb = cluster.getThumbprint(host)
 	assert.Equal(t, tb, "123")
 
-	//two api server, two thumbprint
+	// two api server, two thumbprint
 	thumbprint = []string{"123", "234"}
 	cluster.config.Thumbprint = thumbprint
 	tb = cluster.getThumbprint("127.0.0.1:443")
@@ -67,7 +67,7 @@ func TestCluster_getThumbprint(t *testing.T) {
 	tb = cluster.getThumbprint("127.0.0.2:443")
 	assert.Equal(t, tb, "234")
 
-	//two api server no port, two thumbprint
+	// two api server no port, two thumbprint
 	cluster.endpoints[0].provider = &address{host: "127.0.0.1"}
 	cluster.endpoints[1].provider = &address{host: "127.0.0.2"}
 	tb = cluster.getThumbprint("127.0.0.1:443")
@@ -89,7 +89,7 @@ func TestCluster_NewRestConnector(t *testing.T) {
 	index := strings.Index(ts.URL, "//")
 	a := ts.URL[index+2:]
 	thumbprint := []string{"123"}
-	config := NewConfig(a, "admin", "passw0rd", "", 10, 3, 20, 20, true, true, true, ratelimiter.AIMD, nil, nil, thumbprint)
+	config := NewConfig(a, "admin", "passw0rd", []string{}, 10, 3, 20, 20, true, true, true, ratelimiter.AIMD, nil, nil, thumbprint)
 	c, _ := NewCluster(config)
 	con, _ := c.NewRestConnector()
 	assert.NotNil(t, con)
@@ -108,7 +108,7 @@ func TestCluster_createTransport(t *testing.T) {
 	index := strings.Index(ts.URL, "//")
 	a := ts.URL[index+2:]
 	thumbprint := []string{"123"}
-	config := NewConfig(a, "admin", "passw0rd", "", 10, 3, 20, 20, true, true, true, ratelimiter.AIMD, nil, nil, thumbprint)
+	config := NewConfig(a, "admin", "passw0rd", []string{}, 10, 3, 20, 20, true, true, true, ratelimiter.AIMD, nil, nil, thumbprint)
 	c, _ := NewCluster(config)
 	assert.NotNil(t, c.createTransport(10))
 }
@@ -138,7 +138,7 @@ func TestCluster_Health(t *testing.T) {
 	addr := &address{host: "10.0.0.1", scheme: "https"}
 	addr1 := &address{host: "10.0.0.2", scheme: "https"}
 	addr2 := &address{host: "10.0.0.3", scheme: "https"}
-	eps := []*Endpoint{&Endpoint{status: DOWN}, &Endpoint{status: DOWN}, &Endpoint{status: DOWN}}
+	eps := []*Endpoint{{status: DOWN}, {status: DOWN}, {status: DOWN}}
 	eps[0].provider = addr
 	eps[1].provider = addr1
 	eps[2].provider = addr2
@@ -161,38 +161,58 @@ func TestCluster_Health(t *testing.T) {
 }
 
 func TestCluster_enableFeature(t *testing.T) {
-	miniVersion := [3]int64{3, 2, 0}
+	// Test case for enabling feature SecurityPolicy
 	nsxVersion := &NsxVersion{}
 	nsxVersion.NodeVersion = "3.1.3.3.0.18844962"
-	assert.False(t, nsxVersion.featureSupported(miniVersion))
+	assert.False(t, nsxVersion.featureSupported(SecurityPolicy))
+	assert.False(t, nsxVersion.featureSupported(ServiceAccount))
 	nsxVersion.NodeVersion = "3.2.0.3.0.18844962"
-	assert.True(t, nsxVersion.featureSupported(miniVersion))
+	assert.True(t, nsxVersion.featureSupported(SecurityPolicy))
+	assert.False(t, nsxVersion.featureSupported(ServiceAccount))
 	nsxVersion.NodeVersion = "3.11.0.3.0.18844962"
-	assert.True(t, nsxVersion.featureSupported(miniVersion))
+	assert.True(t, nsxVersion.featureSupported(SecurityPolicy))
+	assert.False(t, nsxVersion.featureSupported(ServiceAccount))
+	nsxVersion.NodeVersion = "4.0.0"
+	assert.True(t, nsxVersion.featureSupported(SecurityPolicy))
+	assert.False(t, nsxVersion.featureSupported(ServiceAccount))
+	nsxVersion.NodeVersion = "4.0.1"
+	assert.True(t, nsxVersion.featureSupported(SecurityPolicy))
+	assert.True(t, nsxVersion.featureSupported(ServiceAccount))
 	nsxVersion.NodeVersion = "4.1.0"
-	assert.True(t, nsxVersion.featureSupported(miniVersion))
+	assert.True(t, nsxVersion.featureSupported(SecurityPolicy))
+	assert.True(t, nsxVersion.featureSupported(ServiceAccount))
 	nsxVersion.NodeVersion = "3.2.0"
-	assert.True(t, nsxVersion.featureSupported(miniVersion))
+	assert.True(t, nsxVersion.featureSupported(SecurityPolicy))
+	assert.False(t, nsxVersion.featureSupported(ServiceAccount))
+	nsxVersion.NodeVersion = "4.2.0"
+	assert.True(t, nsxVersion.featureSupported(SecurityPolicy))
+	assert.True(t, nsxVersion.featureSupported(ServiceAccount))
+
+	// Test case for invalid feature
+	feature := 3
+	nsxVersion.NodeVersion = "3.1.3.3.0.18844962"
+	assert.False(t, nsxVersion.featureSupported(feature))
+	nsxVersion.NodeVersion = "3.2.0"
+	assert.False(t, nsxVersion.featureSupported(feature))
 }
 
 func TestCluster_validate(t *testing.T) {
-	miniVersion := [3]int64{3, 2, 0}
 	nsxVersion := &NsxVersion{}
 	nsxVersion.NodeVersion = "12"
 	expect := errors.New("error version format")
-	err := nsxVersion.Validate(miniVersion)
+	err := nsxVersion.Validate()
 	assert.Equal(t, err, expect)
 
 	nsxVersion.NodeVersion = "12.3"
-	err = nsxVersion.Validate(miniVersion)
+	err = nsxVersion.Validate()
 	assert.Equal(t, err, expect)
 
 	nsxVersion.NodeVersion = "3.2.3.3.0.18844962"
-	err = nsxVersion.Validate(miniVersion)
+	err = nsxVersion.Validate()
 	assert.Equal(t, err, nil)
 
 	nsxVersion.NodeVersion = "3.2.3"
-	err = nsxVersion.Validate(miniVersion)
+	err = nsxVersion.Validate()
 	assert.Equal(t, err, nil)
 }
 
@@ -217,7 +237,7 @@ func TestCluster_getVersion(t *testing.T) {
 	thumbprint := []string{"123"}
 	index := strings.Index(ts.URL, "//")
 	a := ts.URL[index+2:]
-	config := NewConfig(a, "admin", "passw0rd", "", 10, 3, 20, 20, true, true, true, ratelimiter.AIMD, nil, nil, thumbprint)
+	config := NewConfig(a, "admin", "passw0rd", []string{}, 10, 3, 20, 20, true, true, true, ratelimiter.AIMD, nil, nil, thumbprint)
 	cluster, _ := NewCluster(config)
 	nsxVersion, err := cluster.GetVersion()
 	assert.True(t, err == nil)

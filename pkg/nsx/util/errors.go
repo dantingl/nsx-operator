@@ -447,12 +447,12 @@ func CreateNsxPendingDelete() *NsxPendingDelete {
 	return nsxErr
 }
 
-type NsxSegemntWithVM struct {
+type NsxSegmentWithVM struct {
 	managerErrorImpl
 }
 
-func CreateNsxSegemntWithVM() *NsxSegemntWithVM {
-	nsxErr := &NsxSegemntWithVM{}
+func CreateNsxSegmentWithVM() *NsxSegmentWithVM {
+	nsxErr := &NsxSegmentWithVM{}
 	nsxErr.msg = "Cannot delete segment as it still has VMs or VIFs attached"
 	return nsxErr
 }
@@ -536,5 +536,37 @@ type PageMaxError struct {
 }
 
 func (err PageMaxError) Error() string {
+	return err.Desc
+}
+
+type PodIPNotFound struct {
+	Desc string
+}
+
+func (err PodIPNotFound) Error() string {
+	return err.Desc
+}
+
+type PodNotRunning struct {
+	Desc string
+}
+
+func (err PodNotRunning) Error() string {
+	return err.Desc
+}
+
+type NoEffectiveOption struct {
+	Desc string
+}
+
+func (err NoEffectiveOption) Error() string {
+	return err.Desc
+}
+
+type RestrictionError struct {
+	Desc string
+}
+
+func (err RestrictionError) Error() string {
 	return err.Desc
 }

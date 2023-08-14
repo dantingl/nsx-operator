@@ -10,23 +10,30 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-var (
-	log = logf.Log.WithName("nsx").WithName("utils")
-)
+var log = logf.Log.WithName("nsx").WithName("utils")
 
-// ErrorDetail is error detail which info extracted from http.Reponse.Body.
+// ErrorDetail is error detail which info extracted from http.Response.Body.
 type ErrorDetail struct {
 	StatusCode         int
 	ErrorCode          int
 	RelatedErrorCodes  []int
 	RelatedStatusCodes []string
 	Details            string
+}
+
+// PortAddress is used when named port is specified.
+type PortAddress struct {
+	// Port is the port number.
+	Port int `json:"port"`
+	// IPs is a list of IPs associated to port number.
+	IPs []string `json:"ips"`
 }
 
 func (e *ErrorDetail) Error() string {
@@ -62,14 +69,14 @@ var (
 	groundTriggers     = []string{"ConnectionError", "Timeout"}
 	retriables         = []string{"APITransactionAborted", "CannotConnectToServer", "ServerBusy"}
 	regenerateTriggers = []string{"InvalidCredentials", "ClientCertificateNotTrusted", "BadXSRFToken"}
-	catagoryTable      = map[string][]string{"groundTriggers": groundTriggers, "retriables": retriables, "regenerateTriggers": regenerateTriggers}
+	categoryTable      = map[string][]string{"groundTriggers": groundTriggers, "retriables": retriables, "regenerateTriggers": regenerateTriggers}
 )
 
-func catagory(err error, cata string) bool {
+func category(err error, cate string) bool {
 	if err == nil {
 		return false
 	}
-	table := catagoryTable[cata]
+	table := categoryTable[cate]
 	for _, e := range table {
 		fn := strings.Split(reflect.TypeOf(err).String(), ".")
 		var name string
@@ -87,17 +94,17 @@ func catagory(err error, cata string) bool {
 
 // ShouldGroundPoint checks if it's a error which grounds an endpoint.
 func ShouldGroundPoint(err error) bool {
-	return catagory(err, "groundTriggers")
+	return category(err, "groundTriggers")
 }
 
 // ShouldRetry checks if it's a retriable error.
 func ShouldRetry(err error) bool {
-	return catagory(err, "retriables")
+	return category(err, "retriables")
 }
 
 // ShouldRegenerate check if it's a error should regenerate pool.
 func ShouldRegenerate(err error) bool {
-	return catagory(err, "regenerateTriggers")
+	return category(err, "regenerateTriggers")
 }
 
 // InitErrorFromResponse returns error based on http.Response
@@ -125,7 +132,7 @@ func extractHTTPDetailFromBody(host string, statusCode int, body []byte) (ErrorD
 	}
 
 	ec.ErrorCode = res.ErrorCode
-	log.V(1).Info("http response", "status code", statusCode, "body", res)
+	log.V(2).Info("http response", "status code", statusCode, "body", res)
 	msg := []string{res.ErrorMsg}
 	for _, a := range res.RelatedErr {
 		ec.RelatedErrorCodes = append(ec.RelatedErrorCodes, a.ErrorCode)
@@ -141,12 +148,15 @@ type errmap map[string]NsxError
 
 var (
 	errorTable = map[string]errmap{
-		"404": //http.StatusNotFound
-		{"202": &BackendResourceNotFound{},
+		"404": // http.StatusNotFound
+		{
+			"202":     &BackendResourceNotFound{},
 			"500090":  &StaleRevision{},
-			"default": &ResourceNotFound{}},
-		"400": //http.StatusBadRequest
-		{"60508": &NsxIndexingInProgress{},
+			"default": &ResourceNotFound{},
+		},
+		"400": // http.StatusBadRequest
+		{
+			"60508":  &NsxIndexingInProgress{},
 			"60514":  &NsxSearchTimeout{},
 			"60515":  &NsxSearchOutOfSync{},
 			"8327":   &NsxOverlapVlan{},
@@ -155,26 +165,31 @@ var (
 			"500087": &StaleRevision{},
 			"500105": &NsxOverlapAddresses{},
 			"500232": &StaleRevision{},
-			"503040": &NsxSegemntWithVM{},
-			"100148": &StaleRevision{}},
-		"500": //http.StatusInternalServerError
-		{"98": &CannotConnectToServer{},
+			"503040": &NsxSegmentWithVM{},
+			"100148": &StaleRevision{},
+		},
+		"500": // http.StatusInternalServerError
+		{
+			"98":  &CannotConnectToServer{},
 			"99":  &ClientCertificateNotTrusted{},
-			"607": &APITransactionAborted{}},
-		"403": //http.StatusForbidden
-		{"98": &BadXSRFToken{},
+			"607": &APITransactionAborted{},
+		},
+		"403": // http.StatusForbidden
+		{
+			"98":  &BadXSRFToken{},
 			"403": &InvalidCredentials{},
-			"505": &InvalidLicense{}},
+			"505": &InvalidLicense{},
+		},
 	}
 
 	errorTable1 = map[string]NsxError{
-		"409"://http.StatusConflict
+		"409":// http.StatusConflict
 		&StaleRevision{},
-		"412"://http.StatusPreconditionFailed
+		"412":// http.StatusPreconditionFailed
 		&StaleRevision{},
-		"429"://http.statusTooManyRequests
+		"429":// http.statusTooManyRequests
 		&TooManyRequests{},
-		"503"://http.StatusServiceUnavailable
+		"503":// http.StatusServiceUnavailable
 		&ServiceUnavailable{},
 	}
 )
@@ -229,11 +244,39 @@ func HandleHTTPResponse(response *http.Response, result interface{}, debug bool)
 		return err, body
 	}
 	if debug {
-		log.V(1).Info("received HTTP response", "response", string(body))
+		log.V(2).Info("received HTTP response", "response", string(body))
 	}
 	if err := json.Unmarshal(body, result); err != nil {
-		log.Error(err, "Error converting HTTP response to result", "result type", result)
+		log.Error(err, "error converting HTTP response to result", "result type", result)
 		return err, body
 	}
 	return nil, body
+}
+
+func MergeAddressByPort(portAddressOriginal []PortAddress) []PortAddress {
+	var portAddress []PortAddress
+	var sortKeys []int
+	mappedPorts := make(map[int][]string)
+	for _, pa := range portAddressOriginal {
+		if _, ok := mappedPorts[pa.Port]; !ok {
+			sortKeys = append(sortKeys, pa.Port)
+			mappedPorts[pa.Port] = pa.IPs
+		} else {
+			mappedPorts[pa.Port] = append(mappedPorts[pa.Port], pa.IPs...)
+		}
+	}
+	sort.Ints(sortKeys)
+	for _, key := range sortKeys {
+		portAddress = append(portAddress, PortAddress{Port: key, IPs: mappedPorts[key]})
+	}
+	return portAddress
+}
+
+func ParseVPCPath(nsxResourcePath string) (orgID string, projectID string, vpcID string, resourceID string) {
+	paras := strings.Split(nsxResourcePath, "/")
+	orgID = paras[2]
+	projectID = paras[4]
+	vpcID = paras[6]
+	resourceID = paras[8]
+	return
 }
